@@ -4,6 +4,7 @@
 
 #define NUM_PAGES 256
 #define PAGE_SIZE 256
+#define NUM_FRAMES 128
 
 #include <string.h>
 #include <stdlib.h>
@@ -26,9 +27,9 @@ int decodeAddress(int address, int *pageNumber, int *pageOffset)
     else
     {
         pageNumberTmp = address / NUM_PAGES;
-        printf("IN FUNC: %d\n", pageNumberTmp);
+//        printf("IN FUNC: %d\n", pageNumberTmp);
         pageOffsetTmp = address % PAGE_SIZE;
-        printf("IN FUNC: %d\n", pageOffsetTmp);
+//        printf("IN FUNC: %d\n", pageOffsetTmp);
         *pageNumber = pageNumberTmp;
         *pageOffset = pageOffsetTmp;
     }
@@ -44,6 +45,7 @@ int readFromBackingStore(FILE *fp, char *buffer, int pageNumber)
     int n, rc;
     long offset;
     int numToRead;
+    char* read;
 
     offset = PAGE_SIZE * pageNumber;
 
@@ -57,6 +59,7 @@ int readFromBackingStore(FILE *fp, char *buffer, int pageNumber)
     numToRead = PAGE_SIZE;
 
     // Start reading
+    // This reads in the first
     n = fread(buffer, sizeof(char), numToRead, fp);
     if (n != numToRead)
     {
@@ -66,36 +69,49 @@ int readFromBackingStore(FILE *fp, char *buffer, int pageNumber)
     else
     {
         printf("success: read %d bytes\n", n);
-        return 0;
     }
-}
-
-int main()
-{
-//    // Testing decodeAddress
-//    int address = 62493;
-//    int pageNumber, pageOffset;
-//
-//    if (decodeAddress(address, &pageNumber, &pageOffset) == 0)
-//    {
-//        printf("TEST: address: %d, pageNumber: %d, pageOffset: %d\n", address, pageNumber, pageOffset);
-//    }
-    char *fname = "BACKING_STORE.dat";
-    FILE *fp = fopen(fname, "r");
-    char buffer[PAGE_SIZE];
-    int successful_read;
-    int pageNo = 0;
-
-    if (fp == NULL)
-    {
-        printf("ERROR: cannot open file \'%s\' for reading\n", fname);
-        exit(8);
-    }
-
-    successful_read = readFromBackingStore(fp, buffer, pageNo);
-
-    fclose(fp);
 
     return 0;
 }
+
+/*
+ * Below is a main file for my own testing and understanding, plz ignore
+ */
+
+//int main()
+//{
+////    // Testing decodeAddress
+////    int address = 62493;
+////    int pageNumber, pageOffset;
+////
+////    if (decodeAddress(address, &pageNumber, &pageOffset) == 0)
+////    {
+////        printf("TEST: address: %d, pageNumber: %d, pageOffset: %d\n", address, pageNumber, pageOffset);
+////    }
+//    char *fname = "BACKING_STORE.dat";
+//    FILE *fp = fopen(fname, "r");
+//    char buffer[PAGE_SIZE];
+//    int successful_read;
+//    int pageNo = 4;
+//
+//    if (fp == NULL)
+//    {
+//        printf("ERROR: cannot open file \'%s\' for reading\n", fname);
+//        exit(8);
+//    }
+//
+//    successful_read = readFromBackingStore(fp, buffer, pageNo);
+//
+//    if (successful_read == 0)
+//    {
+//        for (int i = 0; i < PAGE_SIZE; i++)
+//        {
+//            printf("%d\n", buffer[i]);
+//        }
+//    }
+//
+//    fclose(fp);
+//
+//    return 0;
+//}
 
