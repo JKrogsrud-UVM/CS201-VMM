@@ -6,6 +6,7 @@
 #define PAGE_SIZE 256
 #define NUM_FRAMES 128
 #define ADDRESS_LEN 10
+#define TLB_SIZE 16
 
 #include <string.h>
 #include <stdlib.h>
@@ -16,6 +17,41 @@ typedef struct {
     int accessTime[NUM_FRAMES]; // Most recent time a frame was accessed
     unsigned char freeFrame[NUM_FRAMES]; // 0 if a frame is occupied; otherwise 1
 } PageTableInfo;
+
+typedef struct {
+    int logicalPageNumber[TLB_SIZE];
+    int frameNumber[TLB_SIZE];
+    int currentIndex; // For storing the current replacement index
+} TLB;
+
+/*
+ * This function will be primarily responsible for looking up frames in the TLB
+ * It returns the frame number if found and -1 if not found
+ *
+ */
+int getFrameNumberFromTLB(TLB *tlb, int pageNum)
+{
+    for (int index = 0; index < TLB_SIZE; ++index)
+    {
+        if (tlb->logicalPageNumber[index] == pageNum)
+        {
+            return tlb->frameNumber[index];
+        }
+    }
+    return -1;
+}
+
+/*
+ * This function handles inserting a new page into the TLB and shifting the index
+ * This will only be called in main when searching the TLB returns -1
+ */
+void insertIntoTLB(TLB *tlb, int pageNum, int frameNum)
+{
+    // Insert at current address
+    tlb->logicalPageNumber[tlb->currentIndex] = pageNum;
+    tlb->frameNumber[tlb->currentIndex] = frameNum;
+    tlb->currentIndex = (tlb->currentIndex + 1) % TLB_SIZE;
+}
 
 /*
  * This function should take a four-byte integer in the range
@@ -73,11 +109,6 @@ int readFromBackingStore(FILE *fp, char *buffer, int pageNumber)
         printf("error: read only %d bytes\n", n);
         return 1;
     }
-//    else
-//    {
-//        printf("success: read %d bytes\n", n);
-//    }
-
     return 0;
 }
 
@@ -115,8 +146,8 @@ int getFrameNumber(PageTableInfo *pageTableInfo, int logicalPageNumber, int acce
                 }
             }
         }
-        // If we make it here then we instead need to evict a frame
-        // So we loop through and find the right frame to evict and return that
+            // If we make it here then we instead need to evict a frame
+            // So we loop through and find the right frame to evict and return that
         else
         {
             earliestAccessIndex = 0;
@@ -147,9 +178,9 @@ int getFrameNumber(PageTableInfo *pageTableInfo, int logicalPageNumber, int acce
     }
 }
 
-int main()
-{
+int main() {
     PageTableInfo pageTableStruct;
+    TLB tlb;
     char physicalMemory[NUM_PAGES * NUM_FRAMES];
     char *addressFile = "addresses.txt";
     char *backingStoreFile = "BACKING_STORE.dat";
@@ -169,19 +200,26 @@ int main()
     int successful_read;
     int pageToEvict;
 
+    int tlbResult;
+
     char data;
 
     // Initialize pageTableStruct
-    for (int i = 0; i < NUM_FRAMES; ++i)
-    {
+    for (int i = 0; i < NUM_FRAMES; ++i) {
         pageTableStruct.accessTime[i] = -1;
         pageTableStruct.freeFrame[i] = 1;
     }
 
     // Initialize pageTable to all -1
-    for (int i = 0; i < NUM_PAGES; ++i)
-    {
+    for (int i = 0; i < NUM_PAGES; ++i) {
         pageTableStruct.pageTable[i] = -1;
+    }
+
+    // Initialize TLB
+    tlb.currentIndex = 0;
+    for (int index = 0; index < TLB_SIZE; ++index) {
+        tlb.logicalPageNumber[index] = -1;
+        tlb.frameNumber[index] = -1;
     }
 
     int currentTime = 0;
@@ -189,79 +227,80 @@ int main()
     // Open file for reading
     FILE *fp = fopen(addressFile, "r");
 
-    if (fp == NULL)
-    {
+    if (fp == NULL) {
         printf("ERROR: cannot open file \'%s\' for reading\n", addressFile);
         exit(8);
     }
 
     // Read a virtual address from addresses.txt
-    while(fgets(addressBuffer, ADDRESS_LEN, fp) != NULL)
-    {
+    while (fgets(addressBuffer, ADDRESS_LEN, fp) != NULL) {
         // Convert to address to int
         address = atoi(addressBuffer);
         decodeAddress(address, &pageNo, &pageOffset);
 
-        // Call getFrameNumber()
-        frameNo = getFrameNumber(&pageTableStruct, pageNo, currentTime, &pageFault);
+        // First we check the TLB
+        tlbResult = getFrameNumberFromTLB(&tlb, pageNo);
 
-        if (pageFault == 1)
-        {
-            // A page fault occurred so we land in two different possible situations
-            // either we had to find an empty frame OR we need to evict a frame
-            if (pageTableStruct.freeFrame[frameNo] == 0)
-            {
-                // This is the case for eviction
-                for (int pageIndex = 0; pageIndex < NUM_PAGES; ++pageIndex)
-                {
-                    // If we find the frameNo in pageTable it is currently being evicted
-                    // Set it at -1
-                    if (pageTableStruct.pageTable[pageIndex] == frameNo)
-                    {
-                        pageToEvict = pageIndex;
-                        pageTableStruct.pageTable[pageIndex] = -1;
+        if (tlbResult != -1){
+            printf("In the TLB!\n");
+            frameNo = tlbResult;
+        }
+        else {
+            frameNo = getFrameNumber(&pageTableStruct, pageNo, currentTime, &pageFault);
+
+            if (pageFault == 1) {
+                // A page fault occurred so we land in two different possible situations
+                // either we had to find an empty frame OR we need to evict a frame
+                if (pageTableStruct.freeFrame[frameNo] == 0) {
+                    // This is the case for eviction
+                    for (int pageIndex = 0; pageIndex < NUM_PAGES; ++pageIndex) {
+                        // If we find the frameNo in pageTable it is currently being evicted
+                        // Set it at -1
+                        if (pageTableStruct.pageTable[pageIndex] == frameNo) {
+                            pageToEvict = pageIndex;
+                            pageTableStruct.pageTable[pageIndex] = -1;
+                        }
+                    }
+                    printf(" => the page mapped to frame %d is %d: page %d is now unmapped (not in memory)\n",
+                           frameNo, pageToEvict, pageToEvict);
+                }
+                // If we needed to evict or otherwise both follow the following
+                // read from Backing_Store into physical memory
+                FILE *fp_2 = fopen(backingStoreFile, "r");
+
+                if (fp_2 == NULL) {
+                    printf("ERROR: cannot open file \'%s\' for reading\n", backingStoreFile);
+                    exit(8);
+                }
+
+                successful_read = readFromBackingStore(fp_2, buffer, pageNo);
+
+                if (successful_read == 0) {
+                    // Save buffer to memory
+                    for (int index = 0; index < PAGE_SIZE; ++index) {
+                        physicalMemory[frameNo * PAGE_SIZE + index] = buffer[index];
                     }
                 }
-                printf(" => the page mapped to frame %d is %d: page %d is now unmapped (not in memory)\n",
-                       frameNo, pageToEvict, pageToEvict);
-            }
-            // If we needed to evict or otherwise both follow the following
-            // read from Backing_Store into physical memory
-            FILE *fp_2 = fopen(backingStoreFile, "r");
 
-            if (fp_2 == NULL)
-            {
-                printf("ERROR: cannot open file \'%s\' for reading\n", backingStoreFile);
-                exit(8);
+                // Update pageTable
+                pageTableStruct.pageTable[pageNo] = frameNo;
+                pageTableStruct.freeFrame[frameNo] = 0;
             }
 
-            successful_read = readFromBackingStore(fp_2, buffer, pageNo);
-
-            if (successful_read == 0)
-            {
-                // Save buffer to memory
-                for (int index = 0; index < PAGE_SIZE; ++index)
-                {
-                    physicalMemory[frameNo * PAGE_SIZE + index] = buffer[index];
-                }
-            }
-
-            // Update pageTable
-            pageTableStruct.pageTable[pageNo] = frameNo;
-            pageTableStruct.freeFrame[frameNo] = 0;
+            // Add the latest find to the tlb for quick access
+            // We can only hit this code if it wasn't found in the TLB so no duplicates
+            insertIntoTLB(&tlb, pageNo, frameNo);
         }
+
         // Here we can just read from memory
         physicalAddress = frameNo * PAGE_SIZE + pageOffset;
         data = physicalMemory[physicalAddress];
 
         // Print Output
 
-        if (pageFault == 1)
-        {
+        if (pageFault == 1) {
             printf("* ");
-        }
-        else
-        {
+        } else {
             printf("  ");
         }
 
